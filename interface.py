@@ -11,7 +11,7 @@ import sys
 import subprocess
 
 try:
-    from translator import translate_pdf, LANGUAGES
+    from translator import translate_pdf, LANGUAGES, PROVIDERS
 except ImportError:
     print("Error: translator.py not found in the same folder.")
     sys.exit(1)
@@ -42,29 +42,35 @@ class PDFTranslatorApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=BG)
 
-        w, h = 600, 680
+        w, h = 620, 720
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
 
-        self._pdf_path = tk.StringVar()
+        self._pdf_path    = tk.StringVar()
         self._output_path = tk.StringVar()
-        self._api_key = tk.StringVar()
+        self._api_key     = tk.StringVar()
         self._target_lang = tk.StringVar(value="Portuguese")
-        self._progress = tk.DoubleVar(value=0)
-        self._status_text = tk.StringVar(value="")
-        self._translating = False
+        self._provider    = tk.StringVar(value="Groq")
+        self._model       = tk.StringVar(value=PROVIDERS["Groq"]["models"][0])
+        self._progress      = tk.DoubleVar(value=0)
+        self._status_text   = tk.StringVar(value="")
+        self._status_detail = tk.StringVar(value="")
+        self._start_time    = None
+        self._translating   = False
+        self._timer_running = False
+        self._elapsed_secs  = 0
 
         self._build_ui()
 
     def _build_ui(self):
+        # Header
         header = tk.Frame(self, bg=ACCENT, height=70)
         header.pack(fill="x")
         header.pack_propagate(False)
-
         tk.Label(header, text="📄 PDF Translator",
                  font=FONT_TITLE, bg=ACCENT, fg="white").pack(side="left", padx=24, pady=16)
-        tk.Label(header, text="Powered by Groq + Llama",
+        tk.Label(header, text="Multi-provider AI Translation",
                  font=FONT_SMALL, bg=ACCENT, fg="#C5CEFF").pack(side="right", padx=24)
 
         body = tk.Frame(self, bg=BG)
@@ -86,22 +92,31 @@ class PDFTranslatorApp(tk.Tk):
         progress_frame = tk.Frame(body, bg=BG)
         progress_frame.pack(fill="x", pady=(14, 0))
 
+        # Linha principal — ex: "Translating page 2 of 5"
+        self._lbl_status = tk.Label(
+            progress_frame, textvariable=self._status_text,
+            font=("Segoe UI", 10, "bold"), bg=BG, fg=TEXT_DARK,
+        )
+        self._lbl_status.pack(anchor="w", pady=(0, 4))
+
         self._progressbar = ttk.Progressbar(
             progress_frame, variable=self._progress,
             maximum=100, mode="determinate",
         )
         self._progressbar.pack(fill="x")
 
-        self._lbl_status = tk.Label(
-            progress_frame, textvariable=self._status_text,
-            font=FONT_SMALL, bg=BG, fg=TEXT_MED,
+        # Linha secundária — ex: "Using Ollama · gemma4:e4b · 00:32 elapsed"
+        self._lbl_detail = tk.Label(
+            progress_frame, textvariable=self._status_detail,
+            font=("Segoe UI", 8), bg=BG, fg=TEXT_LIGHT,
         )
-        self._lbl_status.pack(anchor="w", pady=(4, 0))
+        self._lbl_detail.pack(anchor="w", pady=(4, 0))
 
-        tk.Label(self,
-                 text="Tip: save your key as the GROQ_API_KEY environment variable to avoid typing it every time.",
-                 font=("Segoe UI", 8), bg=BG, fg=TEXT_LIGHT,
-                 wraplength=560).pack(pady=(0, 10))
+        self._lbl_timer = tk.Label(
+            progress_frame, text="",
+            font=("Segoe UI", 9, "bold"), bg=BG, fg=TEXT_MED,
+        )
+        self._lbl_timer.pack(anchor="e", pady=(2, 0))
 
     def _card(self, parent, title, build_fn):
         frame = tk.Frame(parent, bg=CARD_BG, bd=1, relief="flat",
@@ -147,23 +162,49 @@ class PDFTranslatorApp(tk.Tk):
                  font=FONT_SMALL, bg=CARD_BG, fg=TEXT_LIGHT).pack(anchor="w", pady=(6, 0))
 
     def _build_config_section(self, parent):
-        lang_row = tk.Frame(parent, bg=CARD_BG)
-        lang_row.pack(fill="x", pady=(0, 10))
-        tk.Label(lang_row, text="Translate to:",
+        # Linha 1: idioma + provider
+        row1 = tk.Frame(parent, bg=CARD_BG)
+        row1.pack(fill="x", pady=(0, 10))
+
+        tk.Label(row1, text="Translate to:",
                  font=FONT_NORMAL, bg=CARD_BG, fg=TEXT_MED).pack(side="left")
-        combo = ttk.Combobox(lang_row, textvariable=self._target_lang,
-                             values=list(LANGUAGES.keys()), state="readonly",
-                             font=FONT_NORMAL, width=18)
-        combo.pack(side="left", padx=(10, 0))
+        ttk.Combobox(row1, textvariable=self._target_lang,
+                     values=list(LANGUAGES.keys()), state="readonly",
+                     font=FONT_NORMAL, width=14).pack(side="left", padx=(8, 20))
 
-        tk.Label(parent, text="Groq API Key:",
+        tk.Label(row1, text="AI Provider:",
+                 font=FONT_NORMAL, bg=CARD_BG, fg=TEXT_MED).pack(side="left")
+        provider_combo = ttk.Combobox(
+            row1, textvariable=self._provider,
+            values=list(PROVIDERS.keys()), state="readonly",
+            font=FONT_NORMAL, width=14,
+        )
+        provider_combo.pack(side="left", padx=(8, 0))
+        provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
+        provider_combo.bind("<<ComboboxSelected>>", self._warn_unstable_provider, add="+")
+
+        # Linha 2: modelo
+        row2 = tk.Frame(parent, bg=CARD_BG)
+        row2.pack(fill="x", pady=(0, 10))
+
+        tk.Label(row2, text="Model:",
+                 font=FONT_NORMAL, bg=CARD_BG, fg=TEXT_MED).pack(side="left")
+        self._model_combo = ttk.Combobox(
+            row2, textvariable=self._model,
+            values=PROVIDERS["Groq"]["models"], state="readonly",
+            font=FONT_NORMAL, width=38,
+        )
+        self._model_combo.pack(side="left", padx=(8, 0))
+
+        # Linha 3: API Key (some para Ollama)
+        self._api_frame = tk.Frame(parent, bg=CARD_BG)
+        self._api_frame.pack(fill="x")
+
+        tk.Label(self._api_frame, text="API Key:",
                  font=FONT_NORMAL, bg=CARD_BG, fg=TEXT_MED).pack(anchor="w")
-        api_row = tk.Frame(parent, bg=CARD_BG)
-        api_row.pack(fill="x", pady=(4, 0))
 
-        env_key = os.environ.get("GROQ_API_KEY", "")
-        if env_key:
-            self._api_key.set(env_key)
+        api_row = tk.Frame(self._api_frame, bg=CARD_BG)
+        api_row.pack(fill="x", pady=(4, 0))
 
         self._api_entry = tk.Entry(api_row, textvariable=self._api_key,
                                    font=FONT_NORMAL, fg=TEXT_DARK, bg="#F0F1F7",
@@ -174,8 +215,61 @@ class PDFTranslatorApp(tk.Tk):
                   font=FONT_SMALL, bg="#F0F1F7", fg=TEXT_MED,
                   relief="flat", bd=0, cursor="hand2",
                   command=self._toggle_api_visibility).pack(side="right")
-        tk.Label(parent, text="Get your free API key at: console.groq.com",
-                 font=FONT_SMALL, bg=CARD_BG, fg=TEXT_LIGHT).pack(anchor="w", pady=(6, 0))
+
+        self._lbl_api_hint = tk.Label(self._api_frame, text="",
+                                      font=FONT_SMALL, bg=CARD_BG, fg=TEXT_LIGHT)
+        self._lbl_api_hint.pack(anchor="w", pady=(4, 0))
+
+        # Carrega env key e atualiza hint
+        self._on_provider_change()
+
+    # ── Eventos ──
+
+    def _warn_unstable_provider(self, event=None):
+        provider = self._provider.get()
+        if "Gemini" in provider:
+            messagebox.showwarning(
+                "Gemini — Compatibility Notice",
+                "Gemini may not work in all regions.\n"
+                "If translation fails, try Groq or Ollama instead."
+            )
+        elif "OpenRouter" in provider:
+            messagebox.showwarning(
+                "OpenRouter — Availability Notice",
+                "Free models on OpenRouter change frequently and may be unavailable.\n"
+                "If translation fails, switch to another model or use Groq instead."
+            )
+
+    def _on_provider_change(self, event=None):
+        provider = self._provider.get()
+        info = PROVIDERS[provider]
+
+        # Atualiza modelos
+        models = info["models"]
+        self._model_combo["values"] = models
+        self._model.set(models[0])
+
+        # Mostra/esconde API Key
+        if info["needs_key"]:
+            self._api_frame.pack(fill="x")
+            # Tenta carregar do ambiente
+            env_map = {
+                "Groq": "GROQ_API_KEY",
+                "Gemini (alfa)(not recommended)": "GEMINI_API_KEY",
+                "OpenRouter (alfa)(not recommended)": "OPENROUTER_API_KEY",
+            }
+            env_key = os.environ.get(env_map.get(provider, ""), "")
+            if env_key:
+                self._api_key.set(env_key)
+
+            hints = {
+                "Groq":       "Get your free key at: console.groq.com",
+                "Gemini (alfa)(not recommended)":     "Get your free key at: aistudio.google.com/app/apikey",
+                "OpenRouter (alfa)(not recommended)": "Get your free key at: openrouter.ai/keys",
+            }
+            self._lbl_api_hint.configure(text=hints.get(provider, ""))
+        else:
+            self._api_frame.pack_forget()
 
     def _style_entry(self, entry):
         entry.configure(highlightthickness=1,
@@ -219,8 +313,9 @@ class PDFTranslatorApp(tk.Tk):
         if not self._pdf_path.get():
             messagebox.showwarning("Warning", "Please select a PDF file first.")
             return
-        if not self._api_key.get().strip():
-            messagebox.showwarning("Warning", "Please enter your Groq API key.")
+        provider = self._provider.get()
+        if PROVIDERS[provider]["needs_key"] and not self._api_key.get().strip():
+            messagebox.showwarning("Warning", f"Please enter your {provider} API key.")
             return
         if not self._output_path.get():
             base, _ = os.path.splitext(self._pdf_path.get())
@@ -228,21 +323,48 @@ class PDFTranslatorApp(tk.Tk):
             self._output_path.set(f"{base}_translated_{lang}.pdf")
 
         self._translating = True
+        self._elapsed_secs = 0
+        self._timer_running = True
+        self._lbl_timer.configure(text="⏱  00:00")
+        self._tick_timer()
         self._btn_translate.configure(state="disabled", text="⏳  Translating...")
         self._progress.set(0)
+        self._status_text.set("Starting translation...")
+        self._status_detail.set(f"Provider: {self._provider.get()}  ·  Model: {self._model.get()}")
+        self._lbl_detail.configure(fg=TEXT_LIGHT)
         threading.Thread(target=self._run_translation, daemon=True).start()
 
+    def _tick_timer(self):
+        """Atualiza o timer a cada segundo, independente da tradução."""
+        if self._timer_running:
+            self._elapsed_secs += 1
+            mins, secs = divmod(self._elapsed_secs, 60)
+            self._lbl_timer.configure(text=f"⏱  {mins:02d}:{secs:02d}")
+            self.after(1000, self._tick_timer)
+
     def _run_translation(self):
+        import time
+        self._start_time = time.time()
         try:
             def on_progress(current, total, msg):
+                import time
                 pct = (current / total * 100) if total > 0 else 0
+                elapsed = int(time.time() - self._start_time)
+                mins, secs = divmod(elapsed, 60)
+                time_str = f"{mins:02d}:{secs:02d}"
+                provider = self._provider.get()
+                model = self._model.get()
+                detail = f"Using {provider}  ·  {model}  ·  {time_str} elapsed"
                 self.after(0, lambda: self._progress.set(pct))
                 self.after(0, lambda: self._status_text.set(msg))
+                self.after(0, lambda d=detail: self._status_detail.set(d))
 
             translate_pdf(
                 input_path=self._pdf_path.get(),
                 output_path=self._output_path.get(),
                 target_lang_display=self._target_lang.get(),
+                provider=self._provider.get(),
+                model=self._model.get(),
                 api_key=self._api_key.get().strip(),
                 progress_callback=on_progress,
             )
@@ -252,19 +374,28 @@ class PDFTranslatorApp(tk.Tk):
 
     def _on_success(self):
         self._translating = False
+        self._timer_running = False
         self._btn_translate.configure(state="normal", text="🚀  Translate PDF")
         self._progress.set(100)
+        import time
+        elapsed = int(time.time() - self._start_time) if self._start_time else 0
+        mins, secs = divmod(elapsed, 60)
         self._status_text.set("✅ PDF translated successfully!")
+        self._status_detail.set(f"Completed in {mins:02d}:{secs:02d}  ·  {self._provider.get()}  ·  {self._model.get()}")
         self._lbl_status.configure(fg=SUCCESS)
+        self._lbl_detail.configure(fg=SUCCESS)
         out = self._output_path.get()
         if messagebox.askyesno("Done!", f"Translated PDF saved at:\n{out}\n\nDo you want to open the file?"):
             self._open_file(out)
 
     def _on_error(self, error_msg):
         self._translating = False
+        self._timer_running = False
         self._btn_translate.configure(state="normal", text="🚀  Translate PDF")
-        self._status_text.set(f"❌ Error: {error_msg}")
+        self._status_text.set("❌ Translation failed.")
+        self._status_detail.set(error_msg[:80] + ("..." if len(error_msg) > 80 else ""))
         self._lbl_status.configure(fg=ERROR_COLOR)
+        self._lbl_detail.configure(fg=ERROR_COLOR)
         messagebox.showerror("Translation error", error_msg)
 
     def _open_file(self, path):
