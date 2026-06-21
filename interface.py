@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 interface.py — PDF Translator GUI
 Run: python interface.py
@@ -11,9 +12,10 @@ import sys
 import subprocess
 
 try:
-    from translator import translate_pdf, LANGUAGES, PROVIDERS
+    from core.pipeline import translate_pdf
+    from config.settings import LANGUAGES, PROVIDERS
 except ImportError:
-    print("Error: translator.py not found in the same folder.")
+    print("Error: project structure not found. Make sure you are in the correct folder.")
     sys.exit(1)
 
 
@@ -42,7 +44,7 @@ class PDFTranslatorApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=BG)
 
-        w, h = 620, 720
+        w, h = 620, 860
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
@@ -89,34 +91,71 @@ class PDFTranslatorApp(tk.Tk):
         )
         self._btn_translate.pack(fill="x", pady=(8, 0))
 
-        progress_frame = tk.Frame(body, bg=BG)
+        progress_frame = tk.Frame(body, bg=CARD_BG, bd=1, relief="flat",
+                                   highlightbackground=BORDER, highlightthickness=1)
         progress_frame.pack(fill="x", pady=(14, 0))
 
-        # Linha principal — ex: "Translating page 2 of 5"
+        # ── Cabeçalho do painel ──
+        header_row = tk.Frame(progress_frame, bg=CARD_BG)
+        header_row.pack(fill="x", padx=14, pady=(10, 4))
+
         self._lbl_status = tk.Label(
-            progress_frame, textvariable=self._status_text,
-            font=("Segoe UI", 10, "bold"), bg=BG, fg=TEXT_DARK,
+            header_row, textvariable=self._status_text,
+            font=("Segoe UI", 10, "bold"), bg=CARD_BG, fg=TEXT_DARK, anchor="w",
         )
-        self._lbl_status.pack(anchor="w", pady=(0, 4))
-
-        self._progressbar = ttk.Progressbar(
-            progress_frame, variable=self._progress,
-            maximum=100, mode="determinate",
-        )
-        self._progressbar.pack(fill="x")
-
-        # Linha secundária — ex: "Using Ollama · gemma4:e4b · 00:32 elapsed"
-        self._lbl_detail = tk.Label(
-            progress_frame, textvariable=self._status_detail,
-            font=("Segoe UI", 8), bg=BG, fg=TEXT_LIGHT,
-        )
-        self._lbl_detail.pack(anchor="w", pady=(4, 0))
+        self._lbl_status.pack(side="left", fill="x", expand=True)
 
         self._lbl_timer = tk.Label(
-            progress_frame, text="",
-            font=("Segoe UI", 9, "bold"), bg=BG, fg=TEXT_MED,
+            header_row, text="",
+            font=("Segoe UI", 9, "bold"), bg=CARD_BG, fg=TEXT_MED,
         )
-        self._lbl_timer.pack(anchor="e", pady=(2, 0))
+        self._lbl_timer.pack(side="right")
+
+        # ── Barra de progresso maior ──
+        bar_frame = tk.Frame(progress_frame, bg=CARD_BG)
+        bar_frame.pack(fill="x", padx=14, pady=(0, 4))
+
+        self._progressbar = ttk.Progressbar(
+            bar_frame, variable=self._progress,
+            maximum=100, mode="determinate",
+        )
+        self._progressbar.pack(fill="x", ipady=4)
+
+        # ── Linha de métricas: provider · model · blocos · páginas ──
+        self._lbl_detail = tk.Label(
+            progress_frame, textvariable=self._status_detail,
+            font=("Segoe UI", 8), bg=CARD_BG, fg=TEXT_LIGHT, anchor="w",
+        )
+        self._lbl_detail.pack(fill="x", padx=14, pady=(0, 6))
+
+        # ── Log rolável — eventos reais do pipeline (independente do heartbeat) ──
+        log_frame = tk.Frame(progress_frame, bg="#F0F1F7")
+        log_frame.pack(fill="x", padx=14, pady=(0, 12))
+
+        log_header = tk.Frame(log_frame, bg="#F0F1F7")
+        log_header.pack(fill="x", padx=8, pady=(6, 2))
+        tk.Label(log_header, text="PIPELINE LOG", font=("Segoe UI", 7, "bold"),
+                 bg="#F0F1F7", fg=TEXT_LIGHT).pack(side="left")
+        self._lbl_log_count = tk.Label(log_header, text="",
+                 font=("Segoe UI", 7), bg="#F0F1F7", fg=TEXT_LIGHT)
+        self._lbl_log_count.pack(side="right")
+
+        self._log_text = tk.Text(
+            log_frame, height=10, font=("Consolas", 8),
+            bg="#F0F1F7", fg=TEXT_DARK, relief="flat",
+            state="disabled", wrap="word", bd=0,
+            cursor="arrow",
+        )
+        self._log_text.pack(fill="x", padx=8, pady=(0, 6))
+
+        # Tags de cor
+        self._log_text.tag_configure("ok",      foreground=SUCCESS)
+        self._log_text.tag_configure("warn",    foreground="#E67E22")
+        self._log_text.tag_configure("info",    foreground=ACCENT)
+        self._log_text.tag_configure("default", foreground=TEXT_DARK)
+        self._log_text.tag_configure("sep",     foreground=TEXT_LIGHT)
+
+        self._log_line_count = 0
 
     def _card(self, parent, title, build_fn):
         frame = tk.Frame(parent, bg=CARD_BG, bd=1, relief="flat",
@@ -342,22 +381,54 @@ class PDFTranslatorApp(tk.Tk):
             self._lbl_timer.configure(text=f"⏱  {mins:02d}:{secs:02d}")
             self.after(1000, self._tick_timer)
 
+    def _log(self, msg: str, tag: str = "default"):
+        """Escreve uma linha no pipeline log com timestamp."""
+        import time as _time
+        elapsed = int(_time.time() - self._start_time) if self._start_time else 0
+        mins, secs = divmod(elapsed, 60)
+        timestamp = f"[{mins:02d}:{secs:02d}]"
+
+        def _write():
+            self._log_line_count += 1
+            self._log_text.configure(state="normal")
+            self._log_text.insert("end", f"{timestamp} {msg}\n", tag)
+            self._log_text.see("end")
+            self._log_text.configure(state="disabled")
+            self._lbl_log_count.configure(text=f"{self._log_line_count} events")
+
+        self.after(0, _write)
+
     def _run_translation(self):
         import time
         self._start_time = time.time()
+        self._log_line_count = 0
+
+        # Limpa o log ao iniciar nova tradução
+        self._log_text.configure(state="normal")
+        self._log_text.delete("1.0", "end")
+        self._log_text.configure(state="disabled")
+        self._lbl_log_count.configure(text="")
+
         try:
             def on_progress(current, total, msg):
-                import time
+                """Atualiza barra + status + heartbeat. NÃO escreve no log."""
+                import time as _t
                 pct = (current / total * 100) if total > 0 else 0
-                elapsed = int(time.time() - self._start_time)
+                elapsed = int(_t.time() - self._start_time)
                 mins, secs = divmod(elapsed, 60)
                 time_str = f"{mins:02d}:{secs:02d}"
                 provider = self._provider.get()
-                model = self._model.get()
-                detail = f"Using {provider}  ·  {model}  ·  {time_str} elapsed"
+                model    = self._model.get()
+                blocks_info = f"{current}/{total} blocks" if total > 1 else ""
+                detail = f"{provider}  ·  {model}  ·  {blocks_info}  ·  {time_str} elapsed"
+
                 self.after(0, lambda: self._progress.set(pct))
-                self.after(0, lambda: self._status_text.set(msg))
+                self.after(0, lambda m=msg: self._status_text.set(m))
                 self.after(0, lambda d=detail: self._status_detail.set(d))
+
+            def on_log(msg, tag="info"):
+                """Escreve eventos reais do pipeline no log. Independente do heartbeat."""
+                self._log(msg, tag)
 
             translate_pdf(
                 input_path=self._pdf_path.get(),
@@ -367,6 +438,7 @@ class PDFTranslatorApp(tk.Tk):
                 model=self._model.get(),
                 api_key=self._api_key.get().strip(),
                 progress_callback=on_progress,
+                log_callback=on_log,
             )
             self.after(0, self._on_success)
         except Exception as e:
