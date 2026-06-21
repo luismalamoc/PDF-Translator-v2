@@ -28,7 +28,8 @@ Built as a portfolio project to demonstrate integration between Python, AI APIs,
 - 🌍 Translate to 10 languages: Portuguese, English, Spanish, French, German, Italian, Japanese, Chinese, Russian and Arabic
 - 📝 Detects and preserves titles, bold text, lists and paragraph structure
 - 🤖 Support for multiple AI providers: **Groq, Gemini, OpenRouter and Ollama (local)**
-- 🖥️ Clean and simple desktop interface with real-time progress
+- 📷 **OCR support for scanned PDFs** — image-only pages are automatically detected and processed
+- 🖥️ Clean and simple desktop interface with real-time progress and pipeline log
 - 💡 Auto-suggests output file name and path
 - 🔒 Supports API key via environment variable
 
@@ -55,6 +56,7 @@ Built as a portfolio project to demonstrate integration between Python, AI APIs,
 | Tkinter | Desktop GUI |
 | pdfplumber | PDF text extraction with formatting detection |
 | ReportLab | Translated PDF generation |
+| pytesseract + Pillow | OCR for scanned PDFs |
 | Groq API | AI translation (Llama 3.3 70B) |
 | Ollama | Local AI inference |
 
@@ -63,6 +65,8 @@ Built as a portfolio project to demonstrate integration between Python, AI APIs,
 ### 📦 Download
 
 Download the latest Windows executable (`.exe`) from the [Releases](../../releases) page — no Python installation required.
+
+> ⚠️ **For OCR support:** Tesseract must be installed separately. See the [Tesseract setup guide](#tesseract-ocr-for-scanned-pdfs) below.
 
 ---
 
@@ -83,6 +87,41 @@ pip install -r requirements.txt
 ```bash
 python interface.py
 ```
+
+---
+
+### 🔍 Tesseract OCR (for scanned PDFs)
+
+Tesseract is a free OCR engine that lets the app read scanned or image-only PDFs. It must be installed separately on your system.
+
+**Windows**
+
+1. Download the installer from **[github.com/UB-Mannheim/tesseract/wiki](https://github.com/UB-Mannheim/tesseract/wiki)**
+   - Choose the `tesseract-ocr-w64-setup-x.x.x.exe` (64-bit) file
+2. During installation:
+   - Check **"Add to PATH"** when prompted
+   - Under **Additional language data**, select **Portuguese** (and any other languages you need)
+3. After installation, open a new terminal and verify:
+```bash
+tesseract --version
+```
+4. If the command is not recognized, add it manually to PATH:
+   - Search for **"Environment Variables"** in Windows settings
+   - Edit the **Path** variable under System variables
+   - Add: `C:\Program Files\Tesseract-OCR`
+   - Open a new terminal and try again
+
+**Linux**
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-por
+```
+
+**macOS**
+```bash
+brew install tesseract
+```
+
+> Once Tesseract is installed, OCR works automatically — scanned pages are detected and processed without any extra steps in the app.
 
 ---
 
@@ -139,17 +178,17 @@ The download may take a few minutes depending on your internet speed.
 3. Select the **target language** from the dropdown menu
 4. Select your **AI Provider** and **Model**
 5. Paste your **API key** (not needed for Ollama)
-6. Click **"Translate PDF"** and wait — the progress bar shows each page being translated
+6. Click **"Translate PDF"** and wait — the progress bar and pipeline log show real-time status
 7. When done, the app will ask if you want to open the translated file automatically
 
 ---
 
 ### ⚠️ Limitations
 
-- Works with text-based PDFs only — scanned documents (photos of pages) are not supported
-- Groq free tier: ~1,400 requests/day
+- Groq free tier: ~1,400 requests/day and 6,000 tokens/minute
 - OpenRouter free models change frequently and may be unavailable at any time
 - Gemini may not work in all regions
+- OCR quality depends on scan resolution — 150 DPI or higher recommended
 
 ---
 
@@ -168,7 +207,8 @@ Desenvolvido como projeto de portfólio para demonstrar integração entre Pytho
 - 🌍 Traduz para 10 idiomas: Português, Inglês, Espanhol, Francês, Alemão, Italiano, Japonês, Chinês, Russo e Árabe
 - 📝 Detecta e preserva títulos, negrito, listas e estrutura de parágrafos
 - 🤖 Suporte a múltiplos provedores de IA: **Groq, Gemini, OpenRouter e Ollama (local)**
-- 🖥️ Interface desktop limpa com progresso em tempo real
+- 📷 **Suporte a OCR para PDFs escaneados** — páginas com imagem são detectadas e processadas automaticamente
+- 🖥️ Interface desktop limpa com progresso em tempo real e log do pipeline
 - 💡 Sugere automaticamente o nome e o caminho do arquivo de saída
 - 🔒 Suporta chave de API via variável de ambiente
 
@@ -195,6 +235,7 @@ Desenvolvido como projeto de portfólio para demonstrar integração entre Pytho
 | Tkinter | Interface gráfica |
 | pdfplumber | Extração de texto com detecção de formatação |
 | ReportLab | Geração do PDF traduzido |
+| pytesseract + Pillow | OCR para PDFs escaneados |
 | Groq API | Tradução com IA (Llama 3.3 70B) |
 | Ollama | Inferência local de IA |
 
@@ -203,6 +244,8 @@ Desenvolvido como projeto de portfólio para demonstrar integração entre Pytho
 ### 📦 Download
 
 Baixe o executável para Windows (`.exe`) na página de [Releases](../../releases) — sem precisar instalar nada.
+
+> ⚠️ **Para suporte a OCR:** o Tesseract precisa ser instalado separadamente. Veja o [guia de instalação](#tesseract-ocr-para-pdfs-escaneados) abaixo.
 
 ---
 
@@ -223,6 +266,41 @@ pip install -r requirements.txt
 ```bash
 python interface.py
 ```
+
+---
+
+### 🔍 Tesseract OCR (para PDFs escaneados)
+
+O Tesseract é um motor de OCR gratuito que permite ao app ler PDFs escaneados ou com apenas imagens. Ele precisa ser instalado separadamente no seu sistema.
+
+**Windows**
+
+1. Baixe o instalador em **[github.com/UB-Mannheim/tesseract/wiki](https://github.com/UB-Mannheim/tesseract/wiki)**
+   - Escolha o arquivo `tesseract-ocr-w64-setup-x.x.x.exe` (64-bit)
+2. Durante a instalação:
+   - Marque a opção **"Add to PATH"** quando aparecer
+   - Em **Additional language data**, selecione **Portuguese** (e outros idiomas que precisar)
+3. Após instalar, abra um terminal novo e verifique:
+```bash
+tesseract --version
+```
+4. Se o comando não for reconhecido, adicione manualmente ao PATH:
+   - Pesquise **"Variáveis de Ambiente"** nas configurações do Windows
+   - Edite a variável **Path** em variáveis do sistema
+   - Adicione: `C:\Program Files\Tesseract-OCR`
+   - Abra um terminal novo e tente novamente
+
+**Linux**
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-por
+```
+
+**macOS**
+```bash
+brew install tesseract
+```
+
+> Com o Tesseract instalado, o OCR funciona automaticamente — páginas escaneadas são detectadas e processadas sem nenhuma configuração extra no app.
 
 ---
 
@@ -279,17 +357,17 @@ O download pode demorar alguns minutos dependendo da sua internet.
 3. Selecione o **idioma de destino** no menu
 4. Selecione o **AI Provider** e o **Model**
 5. Cole sua **chave de API** (não necessário para Ollama)
-6. Clique em **"Translate PDF"** e aguarde — a barra de progresso mostra cada página sendo traduzida
+6. Clique em **"Translate PDF"** e aguarde — a barra de progresso e o log do pipeline mostram o status em tempo real
 7. Ao finalizar, o aplicativo pergunta se você quer abrir o arquivo traduzido automaticamente
 
 ---
 
 ### ⚠️ Limitações
 
-- Funciona apenas com PDFs de texto — documentos escaneados (fotos de páginas) não são suportados
-- Plano gratuito do Groq: ~1.400 requisições por dia
+- Plano gratuito do Groq: ~1.400 requisições por dia e 6.000 tokens por minuto
 - Modelos gratuitos do OpenRouter mudam frequentemente e podem estar indisponíveis
 - Gemini pode não funcionar em todas as regiões
+- Qualidade do OCR depende da resolução do scan — recomendado 150 DPI ou mais
 
 ---
 
